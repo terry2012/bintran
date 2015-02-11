@@ -1,12 +1,8 @@
 #!/usr/bin/env python
-# This is a template for implementing CFI on static binaries.
-# cfi_1 applies to individual objects while cfi_2 applies to
-# the linked executable.  Note that currently the script does
-# not handle indirect CALLs.
 import sys
 import os
 import re
-from bintran import Insn, Elf32, Elf32_Rel, Elf32_Sym, assemble
+from bintran import Elf32, Elf32_Rel, Elf32_Sym, assemble
 from ctypes import *
 
 def cfi_2(elf):
@@ -43,6 +39,14 @@ def cfi_1(elf):
     elf.flatten()
     # rewrite "calls"
     calls = filter(lambda i: i.mnemonic == 'call', elf.disasm())
+    rels = elf('.rel.text', Elf32_Rel)
+    syms = elf('.symtab', Elf32_Sym)
+    for r in rels:
+        s = syms[r.r_info >> 8]
+        if elf[elf.shdrs[elf('.symtab').sh_link].sh_offset+s.st_name:] in\
+                ('_minix_ipcvecs', 'getcontext'):
+            # excluding _minix_ipcvecs call
+            calls = filter(lambda i: not (i.address < r.r_offset < i.address + len(i)), calls)
     print '  %d CALLs found' % len(calls)
     calls.reverse()
     code = assemble('push 0xdeadbeef')
@@ -58,13 +62,16 @@ def cfi_1(elf):
         else:
             assert False, 'unexpected CALL? %s' % str(i)
     # rewrite "ret" and "repz ret"
+    if os.path.basename(objfile) == 'ucontext.o': # ucontext.o reads return addresses
+        return elf
     rets = filter(lambda i: i.mnemonic == 'ret' or i.op_str == 'ret', elf.disasm())
     print '  %d RETs found' % len(rets)
     rets.reverse()
     code = assemble(('pop ecx\n'
                      'cmp ecx, 0xdeadbeef\n'
-                     'jae near $\n'
-                     'jmp dword [0xdeadbeef+ecx*4]\n'))
+                     'jae n\n'
+                     'jmp dword [0xdeadbeef+ecx*4]\n'
+                     'n: jmp ecx\n'))
     for r in rets:
         elf.insert(r.address, '\x90'*(len(code)-len(r)))
         elf[elf('.text').sh_offset+r.address:] = code
@@ -72,7 +79,7 @@ def cfi_1(elf):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print 'cfi.py [phase] [binary_path]'
+        print 'vfs.py [phase] [binary_path]'
         sys.exit(0)
     for objfile in sys.argv[2:]:
         print '%s' % objfile
