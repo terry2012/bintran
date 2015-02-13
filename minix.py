@@ -131,15 +131,6 @@ def cfi_2(elf):
         elf[elf.addr2off(insns[r].address)+3:] = string_at(pointer(c_uint(rtsym.st_value+rtndx*4)), 4)
         rtndx += len(cs)
         assert rtndx * 4 < rtsym.st_size
-    # differentiate all unmatched calls for debugging when they are accidentally used
-    count = 0
-    pushes = filter(lambda i: i.bytes == '\x68\xef\xbe\xad\xde', insns)
-    for i in range(len(pushes)):
-        push_offset = elf.addr2off(pushes[i].address)
-        if elf[push_offset+1:push_offset+5] == '\xef\xbe\xad\xde':
-            elf[push_offset+1:] = string_at(pointer(c_uint(0xdeadbeef+i)), 4)
-            count += 1
-    print '  %d unmatched CALLs' % count
     return elf
 
 def cfi_1(elf):
